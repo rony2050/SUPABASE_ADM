@@ -25,6 +25,7 @@ export const App: React.FC = () => {
   // Ações pendentes
   const [isActionPending, setIsActionPending] = useState<boolean>(false);
   const [isCreating, setIsCreating] = useState<boolean>(false);
+  const [isRestartingApp, setIsRestartingApp] = useState<boolean>(false);
 
   // Notificações Toast
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
@@ -166,6 +167,32 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleRestartApp = async () => {
+    if (!window.confirm('Tem certeza que deseja reiniciar a aplicação do Supabase Manager? O serviço será reiniciado.')) {
+      return;
+    }
+    setIsRestartingApp(true);
+    showToast('Enviando comando para reiniciar o Supabase Manager...', 'info');
+    try {
+      const res = await fetch('/api/system/restart', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        showToast('Aplicação reiniciando! A página será recarregada em instantes...', 'success');
+        setTimeout(() => {
+          window.location.reload();
+        }, 3500);
+      } else {
+        showToast(data.error || 'Falha ao reiniciar aplicação.', 'error');
+        setIsRestartingApp(false);
+      }
+    } catch {
+      showToast('Aplicação reiniciando! Reconectando...', 'info');
+      setTimeout(() => {
+        window.location.reload();
+      }, 3500);
+    }
+  };
+
   // Filtragem de instâncias
   const filteredInstances = instances.filter((inst) => {
     const matchesSearch = inst.name.toLowerCase().includes(searchQuery.toLowerCase());
@@ -210,6 +237,8 @@ export const App: React.FC = () => {
         systemInfo={systemInfo}
         onRefresh={() => fetchData(false)}
         onOpenCreateModal={() => setIsCreateModalOpen(true)}
+        onRestartApp={handleRestartApp}
+        isRestartingApp={isRestartingApp}
         isLoading={isLoading}
       />
 

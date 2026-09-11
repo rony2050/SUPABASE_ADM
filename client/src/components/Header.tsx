@@ -1,11 +1,13 @@
 import React from 'react';
-import { Plus, RefreshCw, Server, Cpu, CheckCircle2, XCircle } from 'lucide-react';
+import { Plus, RefreshCw, Server, Cpu, CheckCircle2, XCircle, Power } from 'lucide-react';
 import { SystemInfo } from '../types';
 
 interface HeaderProps {
   systemInfo: SystemInfo | null;
   onRefresh: () => void;
   onOpenCreateModal: () => void;
+  onRestartApp?: () => void;
+  isRestartingApp?: boolean;
   isLoading: boolean;
 }
 
@@ -13,6 +15,8 @@ export const Header: React.FC<HeaderProps> = ({
   systemInfo,
   onRefresh,
   onOpenCreateModal,
+  onRestartApp,
+  isRestartingApp = false,
   isLoading,
 }) => {
   return (
@@ -92,6 +96,30 @@ export const Header: React.FC<HeaderProps> = ({
             <RefreshCw size={15} className={isLoading ? 'animate-spin' : ''} />
             <span>Atualizar</span>
           </button>
+
+          {/* Botão Reiniciar Aplicação */}
+          {onRestartApp && (
+            <button
+              onClick={onRestartApp}
+              title="Reiniciar serviço do Supabase Manager"
+              disabled={isRestartingApp}
+              style={{
+                background: 'rgba(245, 158, 11, 0.12)',
+                border: '1px solid rgba(245, 158, 11, 0.3)',
+                color: '#f59e0b',
+                padding: '8px 12px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '0.85rem',
+              }}
+            >
+              <Power size={14} className={isRestartingApp ? 'animate-spin' : ''} />
+              <span>{isRestartingApp ? 'Reiniciando...' : 'Reiniciar App'}</span>
+            </button>
+          )}
 
           {/* Botão Criar Instância */}
           <button

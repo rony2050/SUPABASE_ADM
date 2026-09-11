@@ -289,17 +289,22 @@ export const InstanceCard: React.FC<InstanceCardProps> = ({
           <button
             onClick={() => onRestart(instance.name)}
             disabled={isActionPending}
-            title="Reiniciar containers"
+            title="Reiniciar todos os containers desta instância"
             style={{
-              background: 'var(--bg-secondary)',
-              border: '1px solid var(--border-subtle)',
-              color: 'var(--text-secondary)',
-              padding: '6px 8px',
+              background: 'rgba(59, 130, 246, 0.15)',
+              border: '1px solid rgba(59, 130, 246, 0.3)',
+              color: '#60a5fa',
+              padding: '6px 10px',
               borderRadius: '6px',
+              fontSize: '0.8rem',
               cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
             }}
           >
-            <RotateCw size={13} />
+            <RotateCw size={12} />
+            <span>Reiniciar</span>
           </button>
 
           <button

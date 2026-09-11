@@ -50,3 +50,10 @@ export async function getSystemInfo(): Promise<SystemInfo> {
     runningContainersCount,
   };
 }
+
+export async function restartApplication(): Promise<{ message: string }> {
+  setTimeout(() => {
+    process.exit(0);
+  }, 1000);
+  return { message: 'Serviço do Supabase Manager reiniciando...' };
+}
