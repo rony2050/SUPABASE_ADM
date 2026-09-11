@@ -1,0 +1,194 @@
+version: "3.8"
+
+name: supabase_${INSTANCE_NAME}
+
+networks:
+  default:
+    name: supabase_net_${INSTANCE_NAME}
+
+volumes:
+  db_data:
+    name: supabase_db_data_${INSTANCE_NAME}
+  storage_data:
+    name: supabase_storage_data_${INSTANCE_NAME}
+
+services:
+  studio:
+    container_name: supabase_${INSTANCE_NAME}_studio
+    image: supabase/studio:latest
+    restart: unless-stopped
+    ports:
+      - "${STUDIO_PORT}:3000"
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DEFAULT_ORGANIZATION_NAME: "Local Supabase (${INSTANCE_NAME})"
+      DEFAULT_PROJECT_NAME: "${INSTANCE_NAME}"
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      LOGFLARE_API_KEY: ""
+      LOGFLARE_URL: ""
+    depends_on:
+      db:
+        condition: service_healthy
+      meta:
+        condition: service_started
+
+  kong:
+    container_name: supabase_${INSTANCE_NAME}_kong
+    image: kong:2.8.1
+    restart: unless-stopped
+    ports:
+      - "${KONG_HTTP_PORT}:8000"
+      - "${KONG_HTTPS_PORT}:8443"
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl,basic-auth
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+    volumes:
+      - ./kong.yml:/var/lib/kong/kong.yml:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  auth:
+    container_name: supabase_${INSTANCE_NAME}_auth
+    image: supabase/gotrue:v2.158.1
+    restart: unless-stopped
+    ports:
+      - "${AUTH_PORT}:9999"
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres?sslmode=disable&search_path=auth
+      GOTRUE_SITE_URL: ${SITE_URL}
+      GOTRUE_URI_ALLOW_LIST: "*"
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}
+      GOTRUE_SMTP_HOST: ${SMTP_HOST}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT}
+      GOTRUE_SMTP_USER: ${SMTP_USER}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  rest:
+    container_name: supabase_${INSTANCE_NAME}_rest
+    image: postgrest/postgrest:v12.2.0
+    restart: unless-stopped
+    ports:
+      - "${REST_PORT}:3000"
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public,storage,graphql_public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_BUILTIN_AUTH: "false"
+      PGRST_ADMIN_SERVER_PORT: 3001
+    depends_on:
+      db:
+        condition: service_healthy
+
+  realtime:
+    container_name: supabase_${INSTANCE_NAME}_realtime
+    image: supabase/realtime:v2.30.23
+    restart: unless-stopped
+    ports:
+      - "${REALTIME_PORT}:4000"
+    environment:
+      PORT: 4000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: postgres
+      DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
+      DB_ENC_KEY: supabaserealtime
+      API_JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      ERL_AFLAGS: -proto_dist inet_tcp
+      ENABLE_TAILSCALE: "false"
+      DNS_NODES: "''"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  storage:
+    container_name: supabase_${INSTANCE_NAME}_storage
+    image: supabase/storage-api:v1.11.13
+    restart: unless-stopped
+    ports:
+      - "${STORAGE_PORT}:5000"
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT}
+      STORAGE_BACKEND: ${STORAGE_BACKEND}
+      FILE_STORAGE_BACKEND_PATH: ${FILE_STORAGE_BACKEND_PATH}
+      TENANT_ID: stub
+      REGION: stub
+      GLOBAL_S3_BUCKET: ${GLOBAL_S3_BUCKET}
+      ENABLE_IMAGE_TRANSFORMATION: "true"
+      IMGPROXY_URL: ""
+    volumes:
+      - storage_data:/var/lib/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      rest:
+        condition: service_started
+
+  meta:
+    container_name: supabase_${INSTANCE_NAME}_meta
+    image: supabase/postgres-meta:v0.84.2
+    restart: unless-stopped
+    ports:
+      - "${META_PORT}:8080"
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: postgres
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    container_name: supabase_${INSTANCE_NAME}_db
+    image: supabase/postgres:15.6.1.143
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+      JWT_SECRET: ${JWT_SECRET}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -h localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

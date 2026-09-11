@@ -1,0 +1,18 @@
+[Unit]
+Description=Supabase Local Instance Manager Service
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/supabase-manager/server
+ExecStart=/usr/bin/node /opt/supabase-manager/server/dist/index.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=PORT=8585
+Environment=SUPABASE_MANAGER_DIR=/opt/supabase-manager
+
+[Install]
+WantedBy=multi-user.target

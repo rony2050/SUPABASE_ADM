@@ -1,0 +1,5 @@
+.agents
+.ag-kit-backups
+.temp_ag_kit
+node_modules
+package-lock.json

@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  supabase-manager:
+    container_name: supabase_manager_app
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.manager
+    restart: unless-stopped
+    ports:
+      - "8585:8585"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/supabase-manager/instances:/opt/supabase-manager/instances
+      - /opt/supabase-manager/backups:/opt/supabase-manager/backups
+    environment:
+      PORT: 8585
+      NODE_ENV: production
+      SUPABASE_MANAGER_DIR: /opt/supabase-manager
