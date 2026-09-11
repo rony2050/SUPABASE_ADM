@@ -33,6 +33,30 @@ router.get('/:name/credentials', (req: Request, res: Response) => {
   }
 });
 
+// Obter config.toml da instância
+router.get('/:name/config', (req: Request, res: Response) => {
+  try {
+    const config = instanceService.getConfig(req.params.name);
+    res.json({ success: true, data: config });
+  } catch (err: any) {
+    res.status(404).json({ success: false, error: err.message });
+  }
+});
+
+// Salvar config.toml da instância
+router.put('/:name/config', async (req: Request, res: Response) => {
+  try {
+    const { content, restartAfter } = req.body;
+    if (typeof content !== 'string') {
+      return res.status(400).json({ success: false, error: 'O conteúdo do config.toml é obrigatório.' });
+    }
+    const message = await instanceService.saveConfig(req.params.name, content, restartAfter === true);
+    res.json({ success: true, message });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Criar nova instância
 router.post('/', async (req: Request, res: Response) => {
   try {

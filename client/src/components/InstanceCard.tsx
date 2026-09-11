@@ -11,6 +11,7 @@ import {
   Check,
   AlertTriangle,
   Clock,
+  FileCode,
 } from 'lucide-react';
 import { InstanceSummary } from '../types';
 
@@ -18,6 +19,7 @@ interface InstanceCardProps {
   instance: InstanceSummary;
   onOpenCredentials: (name: string) => void;
   onOpenLogs: (name: string) => void;
+  onOpenConfig: (name: string) => void;
   onStart: (name: string) => void;
   onStop: (name: string) => void;
   onRestart: (name: string) => void;
@@ -30,6 +32,7 @@ export const InstanceCard: React.FC<InstanceCardProps> = ({
   instance,
   onOpenCredentials,
   onOpenLogs,
+  onOpenConfig,
   onStart,
   onStop,
   onRestart,
@@ -237,6 +240,26 @@ export const InstanceCard: React.FC<InstanceCardProps> = ({
           >
             <Database size={13} color="#a855f7" />
             <span>Backup</span>
+          </button>
+
+          <button
+            onClick={() => onOpenConfig(instance.name)}
+            title="Editar arquivo config.toml da instância"
+            style={{
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-primary)',
+              padding: '6px 10px',
+              borderRadius: '6px',
+              fontSize: '0.8rem',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+            }}
+          >
+            <FileCode size={13} color="#60a5fa" />
+            <span>Config</span>
           </button>
         </div>
 

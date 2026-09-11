@@ -342,6 +342,130 @@ export class InstanceService {
       (err) => onLogChunk(`[ERROR] ${err}\n`),
       () => onClose()
     );
+  getConfig(name: string): { content: string; path: string } {
+    const instanceDir = path.join(this.instancesDir, name);
+    if (!fs.existsSync(instanceDir)) {
+      throw new Error(`Instância '${name}' não encontrada.`);
+    }
+
+    const configPath = path.join(instanceDir, 'config.toml');
+    if (fs.existsSync(configPath)) {
+      return {
+        content: fs.readFileSync(configPath, 'utf-8'),
+        path: configPath,
+      };
+    }
+
+    // Se não existir, gerar a partir do .env atual
+    const env = this.parseEnvFile(path.join(instanceDir, '.env'));
+    const defaultToml = `# For detailed configuration reference documentation, visit:
+# https://supabase.com/docs/guides/local-development/cli/config
+
+project_id = "${name}"
+
+[api]
+enabled = true
+port = ${env.KONG_HTTP_PORT || 54301}
+external_url = "${env.API_EXTERNAL_URL || `http://localhost:${env.KONG_HTTP_PORT || 54301}`}"
+schemas = ["${(env.PGRST_DB_SCHEMAS || 'public,graphql_public').split(',').join('", "')}"]
+extra_search_path = ["${(env.PGRST_DB_EXTRA_SEARCH_PATH || 'public,extensions').split(',').join('", "')}"]
+max_rows = ${env.PGRST_MAX_ROWS || 1000}
+
+[db]
+port = ${env.POSTGRES_PORT || 54300}
+shadow_port = ${parseInt(env.POSTGRES_PORT || '54300', 10) - 2}
+health_timeout = "2m"
+major_version = ${(env.POSTGRES_VERSION || '15').split('.')[0]}
+
+[studio]
+enabled = true
+port = ${env.STUDIO_PORT || 54303}
+api_url = "${env.SUPABASE_PUBLIC_URL || env.API_EXTERNAL_URL || `http://localhost:${env.KONG_HTTP_PORT || 54301}`}"
+
+[local_smtp]
+enabled = true
+port = ${parseInt(env.STUDIO_PORT || '54303', 10) + 1}
+
+[storage]
+enabled = true
+file_size_limit = "${env.FILE_SIZE_LIMIT ? Math.round(parseInt(env.FILE_SIZE_LIMIT, 10) / (1024 * 1024)) + 'MiB' : '50MiB'}"
+
+[auth]
+enabled = true
+site_url = "${env.SITE_URL || `http://localhost:${env.STUDIO_PORT || 54303}`}"
+additional_redirect_urls = [
+  "${(env.GOTRUE_URI_ALLOW_LIST || '*').split(',').join('",\n  "')}"
+]
+jwt_expiry = ${env.JWT_EXPIRY || 3600}
+enable_signup = ${env.ENABLE_EMAIL_SIGNUP === 'false' ? 'false' : 'true'}
+
+[auth.email]
+enable_signup = ${env.ENABLE_EMAIL_SIGNUP === 'false' ? 'false' : 'true'}
+enable_confirmations = ${env.ENABLE_EMAIL_AUTOCONFIRM === 'true' ? 'false' : 'true'}
+`;
+
+    fs.writeFileSync(configPath, defaultToml, 'utf-8');
+    return {
+      content: defaultToml,
+      path: configPath,
+    };
+  }
+
+  async saveConfig(name: string, content: string, restartAfter: boolean = false): Promise<string> {
+    const instanceDir = path.join(this.instancesDir, name);
+    if (!fs.existsSync(instanceDir)) {
+      throw new Error(`Instância '${name}' não encontrada.`);
+    }
+
+    const configPath = path.join(instanceDir, 'config.toml');
+    fs.writeFileSync(configPath, content, 'utf-8');
+
+    // Sincronizar parâmetros chave para o .env da instância
+    const envPath = path.join(instanceDir, '.env');
+    if (fs.existsSync(envPath)) {
+      let envContent = fs.readFileSync(envPath, 'utf-8');
+
+      // Portas e URLs
+      const portApiMatch = content.match(/\[api\][^\[]*?port\s*=\s*(\d+)/s);
+      if (portApiMatch) {
+        envContent = envContent.replace(/^KONG_HTTP_PORT=.*$/m, `KONG_HTTP_PORT=${portApiMatch[1]}`);
+      }
+
+      const externalUrlMatch = content.match(/\[api\][^\[]*?external_url\s*=\s*"([^"]+)"/s);
+      if (externalUrlMatch) {
+        envContent = envContent.replace(/^API_EXTERNAL_URL=.*$/m, `API_EXTERNAL_URL=${externalUrlMatch[1]}`);
+        envContent = envContent.replace(/^SUPABASE_PUBLIC_URL=.*$/m, `SUPABASE_PUBLIC_URL=${externalUrlMatch[1]}`);
+      }
+
+      const portDbMatch = content.match(/\[db\][^\[]*?port\s*=\s*(\d+)/s);
+      if (portDbMatch) {
+        envContent = envContent.replace(/^POSTGRES_PORT=.*$/m, `POSTGRES_PORT=${portDbMatch[1]}`);
+      }
+
+      const portStudioMatch = content.match(/\[studio\][^\[]*?port\s*=\s*(\d+)/s);
+      if (portStudioMatch) {
+        envContent = envContent.replace(/^STUDIO_PORT=.*$/m, `STUDIO_PORT=${portStudioMatch[1]}`);
+      }
+
+      const siteUrlMatch = content.match(/\[auth\][^\[]*?site_url\s*=\s*"([^"]+)"/s);
+      if (siteUrlMatch) {
+        envContent = envContent.replace(/^SITE_URL=.*$/m, `SITE_URL=${siteUrlMatch[1]}`);
+      }
+
+      const maxRowsMatch = content.match(/max_rows\s*=\s*(\d+)/);
+      if (maxRowsMatch) {
+        envContent = envContent.replace(/^PGRST_MAX_ROWS=.*$/m, `PGRST_MAX_ROWS=${maxRowsMatch[1]}`);
+      }
+
+      fs.writeFileSync(envPath, envContent, 'utf-8');
+    }
+
+    if (restartAfter) {
+      await this.restartInstance(name);
+      return `Arquivo config.toml salvo e instância '${name}' reiniciada com sucesso!`;
+    }
+
+    return `Arquivo config.toml salvo com sucesso!`;
   }
 }
 

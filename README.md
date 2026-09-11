@@ -110,14 +110,20 @@ supabase-ctl keys meu-projeto
 ```
 Exibe a **Anon Key**, **Service Role Key**, **JWT Secret**, endpoints de API e a **Connection String** pronta para colar no `.env` do seu frontend ou backend.
 
-### 4. Iniciar, parar ou reiniciar
+### 4. Editar configuração oficial (config.toml)
+```bash
+supabase-ctl config meu-projeto
+```
+Abre o arquivo `config.toml` da instância no editor de terminal (`$EDITOR`, `nano` ou `vim`) e pergunta se deseja reiniciar os containers para aplicar as alterações.
+
+### 5. Iniciar, parar ou reiniciar
 ```bash
 supabase-ctl stop meu-projeto
 supabase-ctl start meu-projeto
 supabase-ctl restart meu-projeto
 ```
 
-### 5. Visualizar logs em tempo real
+### 6. Visualizar logs em tempo real
 ```bash
 # Logs gerais da instância
 supabase-ctl logs meu-projeto
@@ -127,13 +133,13 @@ supabase-ctl logs meu-projeto auth
 supabase-ctl logs meu-projeto db
 ```
 
-### 6. Fazer backup (Dump SQL)
+### 7. Fazer backup (Dump SQL)
 ```bash
 # Gera backup com data e hora em /opt/supabase-manager/backups/
 supabase-ctl backup meu-projeto
 ```
 
-### 7. Destruir uma instância
+### 8. Destruir uma instância
 ```bash
 # Remove containers e volumes permanentemente
 supabase-ctl destroy meu-projeto
@@ -146,9 +152,11 @@ supabase-ctl destroy meu-projeto
 Acesse `http://<IP_DO_SERVIDOR>:8585` no navegador para:
 1. **Visualizar Cards de Telemetria:** Instâncias ativas, memória RAM e status do Docker Engine.
 2. **Abrir o Studio:** Clique no botão **"Abrir Studio"** no card de qualquer instância para ser redirecionado diretamente ao painel oficial do Supabase para criar tabelas, gerenciar autenticação e buckets de Storage.
-3. **Copiar Chaves Facilmente:** Clique em **"Credenciais"** para revelar e copiar em 1 clique a `anon_key`, `service_role_key` ou URI do PostgreSQL.
-4. **Live Logs:** Clique em **"Logs"** para abrir o terminal integrado que faz streaming dos logs dos containers via Server-Sent Events (SSE).
-5. **Criar Novas Instâncias:** Use o botão **"+ Nova Instância"** para configurar novos projetos em segundos.
+3. **Editar config.toml no Navegador:** Clique em **"Config"** para abrir o editor com syntax monospaced do `config.toml`, ajustar portas, domínios, redirects e salvar com reinício automático.
+4. **Copiar Chaves Facilmente:** Clique em **"Credenciais"** para revelar e copiar em 1 clique a `anon_key`, `service_role_key` ou URI do PostgreSQL.
+5. **Live Logs:** Clique em **"Logs"** para abrir o terminal integrado que faz streaming dos logs dos containers via Server-Sent Events (SSE).
+6. **Reiniciar Serviços:** Botão **"Reiniciar"** individual em cada card de instância e botão **"Reiniciar App"** no cabeçalho do gerenciador.
+7. **Criar Novas Instâncias:** Use o botão **"+ Nova Instância"** para configurar novos projetos em segundos.
 
 ---
 

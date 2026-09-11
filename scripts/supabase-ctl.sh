@@ -451,6 +451,83 @@ cmd_destroy() {
   log_success "Instância '${name}' removida completamente!"
 }
 
+# Editar config.toml da instância
+cmd_config() {
+  local name="${1:-}"
+  if [[ -z "$name" ]]; then
+    log_error "Uso: supabase-ctl config <nome-da-instancia>"
+    exit 1
+  fi
+
+  local instance_dir="${INSTANCES_DIR}/${name}"
+  if [[ ! -d "$instance_dir" ]]; then
+    log_error "Instância '${name}' não encontrada!"
+    exit 1
+  fi
+
+  local config_file="${instance_dir}/config.toml"
+  if [[ ! -f "$config_file" ]]; then
+    log_info "Criando config.toml a partir do ambiente atual da instância..."
+    # shellcheck source=/dev/null
+    source "${instance_dir}/.env"
+    cat <<EOF > "$config_file"
+# Supabase Configuration for instance: ${name}
+# Documentation: https://supabase.com/docs/guides/local-development/cli/config
+
+project_id = "${name}"
+
+[api]
+enabled = true
+port = ${KONG_HTTP_PORT}
+external_url = "${API_EXTERNAL_URL}"
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = ${POSTGRES_PORT}
+shadow_port = $((POSTGRES_PORT - 2))
+health_timeout = "2m"
+major_version = 15
+
+[studio]
+enabled = true
+port = ${STUDIO_PORT}
+api_url = "${SUPABASE_PUBLIC_URL}"
+
+[local_smtp]
+enabled = true
+port = $((STUDIO_PORT + 1))
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[auth]
+enabled = true
+site_url = "${SITE_URL}"
+additional_redirect_urls = [
+  "${SITE_URL}",
+  "${API_EXTERNAL_URL}"
+]
+jwt_expiry = ${JWT_EXPIRY:-3600}
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false
+EOF
+  fi
+
+  log_info "Abrindo ${config_file} com o editor ${EDITOR:-nano}..."
+  "${EDITOR:-nano}" "$config_file"
+
+  read -r -p "Deseja reiniciar os containers de '${name}' para aplicar as alterações? (s/N): " restart_conf
+  if [[ "$restart_conf" == "s" || "$restart_conf" == "S" || "$restart_conf" == "y" || "$restart_conf" == "Y" ]]; then
+    cmd_restart "$name"
+  fi
+}
+
 # Menu de ajuda
 cmd_help() {
   cat <<EOF
@@ -469,6 +546,7 @@ ${BOLD}COMANDOS DISPONÍVEIS:${NC}
   ${GREEN}stop <nome>${NC}               Para os containers da instância
   ${GREEN}restart <nome>${NC}            Reinicia os containers da instância
   ${GREEN}keys <nome>${NC}               Exibe URLs, credenciais, JWTs e string de conexão
+  ${GREEN}config <nome>${NC}             Edita o arquivo config.toml da instância
   ${GREEN}logs <nome> [serviço]${NC}      Visualiza logs em tempo real (ex: logs dev auth)
   ${GREEN}backup <nome> [destino]${NC}    Exporta dump SQL do PostgreSQL
   ${GREEN}destroy <nome>${NC} [--keep-vol] Remove a instância permanentemente
@@ -477,6 +555,7 @@ ${BOLD}EXEMPLOS:${NC}
   supabase-ctl create projeto-app
   supabase-ctl create loja-virtual --port-base 54500
   supabase-ctl list
+  supabase-ctl config projeto-app
   supabase-ctl keys projeto-app
   supabase-ctl logs projeto-app kong
 EOF
@@ -484,15 +563,16 @@ EOF
 
 # Roteador principal
 case "${1:-}" in
-  create)  shift; cmd_create "$@" ;;
-  start)   shift; cmd_start "$@" ;;
-  stop)    shift; cmd_stop "$@" ;;
-  restart) shift; cmd_restart "$@" ;;
-  list)    cmd_list ;;
-  keys)    shift; cmd_keys "$@" ;;
-  logs)    shift; cmd_logs "$@" ;;
-  backup)  shift; cmd_backup "$@" ;;
-  destroy) shift; cmd_destroy "$@" ;;
+  create)      shift; cmd_create "$@" ;;
+  start)       shift; cmd_start "$@" ;;
+  stop)        shift; cmd_stop "$@" ;;
+  restart)     shift; cmd_restart "$@" ;;
+  list)        cmd_list ;;
+  keys)        shift; cmd_keys "$@" ;;
+  config|edit) shift; cmd_config "$@" ;;
+  logs)        shift; cmd_logs "$@" ;;
+  backup)      shift; cmd_backup "$@" ;;
+  destroy)     shift; cmd_destroy "$@" ;;
   help|--help|-h|"") cmd_help ;;
   *)
     log_error "Comando desconhecido: $1"

@@ -6,6 +6,7 @@ import { InstanceCard } from './components/InstanceCard';
 import { CredentialsModal } from './components/CredentialsModal';
 import { LogsModal } from './components/LogsModal';
 import { CreateInstanceModal } from './components/CreateInstanceModal';
+import { ConfigModal } from './components/ConfigModal';
 import { InstanceSummary, InstanceCredentials, SystemInfo } from './types';
 
 export const App: React.FC = () => {
@@ -19,6 +20,7 @@ export const App: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);
   const [selectedCredentials, setSelectedCredentials] = useState<InstanceCredentials | null>(null);
   const [selectedLogsInstance, setSelectedLogsInstance] = useState<string | null>(null);
+  const [selectedConfigInstance, setSelectedConfigInstance] = useState<string | null>(null);
   const [destroyModalInstance, setDestroyModalInstance] = useState<string | null>(null);
   const [deleteVolumes, setDeleteVolumes] = useState<boolean>(true);
 
@@ -376,6 +378,7 @@ export const App: React.FC = () => {
                 onStop={(name) => handleInstanceAction(name, 'stop')}
                 onRestart={(name) => handleInstanceAction(name, 'restart')}
                 onBackup={handleBackup}
+                onOpenConfig={(name) => setSelectedConfigInstance(name)}
                 onDestroy={(name) => setDestroyModalInstance(name)}
                 isActionPending={isActionPending}
               />
@@ -395,6 +398,16 @@ export const App: React.FC = () => {
       <LogsModal
         instanceName={selectedLogsInstance}
         onClose={() => setSelectedLogsInstance(null)}
+      />
+
+      {/* Modal de Configuração config.toml */}
+      <ConfigModal
+        instanceName={selectedConfigInstance}
+        onClose={() => setSelectedConfigInstance(null)}
+        onSaved={(msg) => {
+          showToast(msg, 'success');
+          fetchData(true);
+        }}
       />
 
       {/* Modal de Criar Nova Instância */}
