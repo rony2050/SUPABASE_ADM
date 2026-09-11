@@ -111,6 +111,9 @@ cmd_create() {
 
   local custom_port_base=""
   local custom_db_pass=""
+  local custom_domain=""
+  local custom_api_url=""
+  local custom_studio_url=""
   local start_after=1
 
   while [[ $# -gt 0 ]]; do
@@ -121,6 +124,18 @@ cmd_create() {
         ;;
       --db-pass)
         custom_db_pass="$2"
+        shift 2
+        ;;
+      --domain)
+        custom_domain="$2"
+        shift 2
+        ;;
+      --api-url)
+        custom_api_url="$2"
+        shift 2
+        ;;
+      --studio-url)
+        custom_studio_url="$2"
         shift 2
         ;;
       --no-start)
@@ -173,9 +188,35 @@ cmd_create() {
   secret_key_base=$(echo "$creds" | grep '^SECRET_KEY_BASE=' | cut -d= -f2-)
   vault_enc_key=$(echo "$creds" | grep '^VAULT_ENC_KEY=' | cut -d= -f2-)
 
+  # Calcular URLs públicas (com ou sem domínio de túnel)
+  local site_url="http://localhost:${port_studio}"
+  local api_external_url="http://localhost:${port_kong}"
+  local supabase_public_url="http://localhost:${port_kong}"
+  local allow_list="*"
+
+  if [[ -n "$custom_domain" ]]; then
+    api_external_url="https://${name}.${custom_domain}"
+    supabase_public_url="https://${name}.${custom_domain}"
+    site_url="https://${name}-studio.${custom_domain}"
+    allow_list="${site_url},${site_url}/**,${api_external_url},${api_external_url}/**,http://localhost:3000,http://localhost:3000/**"
+  fi
+
+  if [[ -n "$custom_api_url" ]]; then
+    api_external_url="$custom_api_url"
+    supabase_public_url="$custom_api_url"
+  fi
+
+  if [[ -n "$custom_studio_url" ]]; then
+    site_url="$custom_studio_url"
+  fi
+
   # Gerar .env
   log_info "Configurando ambiente e portas (Base: ${port_base})..."
   sed -e "s|\${INSTANCE_NAME}|${name}|g" \
+      -e "s|\${SITE_URL}|${site_url}|g" \
+      -e "s|\${API_EXTERNAL_URL}|${api_external_url}|g" \
+      -e "s|\${SUPABASE_PUBLIC_URL}|${supabase_public_url}|g" \
+      -e "s|\${GOTRUE_URI_ALLOW_LIST}|${allow_list}|g" \
       -e "s|\${POSTGRES_PORT}|${port_postgres}|g" \
       -e "s|\${KONG_HTTP_PORT}|${port_kong}|g" \
       -e "s|\${KONG_HTTPS_PORT}|${port_kong_ssl}|g" \
@@ -203,8 +244,8 @@ cmd_create() {
   cp "${TEMPLATES_DIR}/docker-compose.template.yml" "${instance_dir}/docker-compose.yml"
 
   log_success "Instância '${name}' configurada com sucesso!"
-  echo -e "  • ${BOLD}Studio Web UI:${NC}    ${CYAN}http://localhost:${port_studio}${NC}"
-  echo -e "  • ${BOLD}Kong API Gateway:${NC} ${CYAN}http://localhost:${port_kong}${NC}"
+  echo -e "  • ${BOLD}Studio Web UI:${NC}    ${CYAN}${site_url}${NC} (Porta local: ${port_studio})"
+  echo -e "  • ${BOLD}Kong API Gateway:${NC} ${CYAN}${api_external_url}${NC} (Porta local: ${port_kong})"
   echo -e "  • ${BOLD}PostgreSQL DB:${NC}    ${CYAN}localhost:${port_postgres}${NC}"
   echo -e "  • ${BOLD}DB Password:${NC}      ${YELLOW}${db_password}${NC}"
 

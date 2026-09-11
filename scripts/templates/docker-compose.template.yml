@@ -70,7 +70,7 @@ services:
       GOTRUE_DB_DRIVER: postgres
       GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres?sslmode=disable&search_path=auth
       GOTRUE_SITE_URL: ${SITE_URL}
-      GOTRUE_URI_ALLOW_LIST: "*"
+      GOTRUE_URI_ALLOW_LIST: "${GOTRUE_URI_ALLOW_LIST:-*}"
       GOTRUE_DISABLE_SIGNUP: "false"
       GOTRUE_JWT_ADMIN_ROLES: service_role
       GOTRUE_JWT_AUD: authenticated
@@ -97,7 +97,9 @@ services:
       - "${REST_PORT}:3000"
     environment:
       PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
-      PGRST_DB_SCHEMAS: public,storage,graphql_public
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS:-public,storage,graphql_public}
+      PGRST_DB_EXTRA_SEARCH_PATH: ${PGRST_DB_EXTRA_SEARCH_PATH:-public,extensions}
+      PGRST_MAX_ROWS: ${PGRST_MAX_ROWS:-1000}
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: ${JWT_SECRET}
       PGRST_DB_USE_BUILTIN_AUTH: "false"
@@ -177,7 +179,7 @@ services:
 
   db:
     container_name: supabase_${INSTANCE_NAME}_db
-    image: supabase/postgres:15.6.1.143
+    image: supabase/postgres:${POSTGRES_VERSION:-15.6.1.143}
     restart: unless-stopped
     ports:
       - "${POSTGRES_PORT}:5432"
