@@ -44,7 +44,30 @@ Cada instância criada é isolada em sua própria rede Docker (`supabase_net_<no
 
 ## 🚀 Instalação Rápida no Linux
 
-### Opção 1: Instalador Automatizado (Recomendado)
+### 🐳 Passo 0: Instalador Automatizado do Docker & Docker Compose (Standalone)
+
+Caso o seu servidor Linux ainda não tenha o Docker configurado, utilize o instalador autônomo oficial do projeto:
+
+```bash
+# Execução direta via curl (sem precisar clonar o repositório):
+curl -fsSL https://raw.githubusercontent.com/rony2050/SUPABASE_ADM/main/scripts/install-docker.sh | sudo bash
+
+# Ou caso já tenha clonado o repositório:
+sudo bash scripts/install-docker.sh
+```
+
+> **O que o instalador do Docker realiza automaticamente:**
+> - Suporte multi-distro: Ubuntu, Debian, Pop!_OS, Linux Mint, CentOS, RHEL, Rocky Linux, AlmaLinux, Fedora, Arch Linux e Alpine Linux.
+> - Instala o **Docker Engine** e o plugin oficial **Docker Compose**.
+> - Configura `/etc/docker/daemon.json` com **rotação automática de logs** (`max-size: 20m`, `max-file: 3`) para evitar estouro de disco com os containers.
+> - Habilita `live-restore` no daemon (containers não caem ao reiniciar o daemon).
+> - Habilita e inicializa o serviço Docker no `systemd` (ou OpenRC/SysVinit).
+> - Adiciona automaticamente seu usuário não-root ao grupo `docker` (permitindo comandos sem `sudo`).
+> - Valida a instalação com teste de comunicação com o daemon.
+
+---
+
+### Opção 1: Instalador Automatizado do Supabase Manager (Recomendado)
 
 Clone o repositório no seu servidor Linux e execute o script de instalação como `root` ou `sudo`:
 
@@ -166,6 +189,7 @@ Acesse `http://<IP_DO_SERVIDOR>:8585` no navegador para:
 /opt/supabase-manager/
 ├── scripts/
 │   ├── install.sh                  # Script mestre de instalação no Linux
+│   ├── install-docker.sh           # Instalador automatizado do Docker & Docker Compose
 │   ├── supabase-ctl.sh             # CLI do terminal
 │   ├── lib/
 │   │   └── keygen.sh               # Gerador OpenSSL de tokens JWT e segredos
