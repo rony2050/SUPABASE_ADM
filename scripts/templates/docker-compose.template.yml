@@ -20,6 +20,7 @@ services:
     ports:
       - "${STUDIO_PORT}:3000"
     environment:
+      HOSTNAME: "0.0.0.0"
       STUDIO_PG_META_URL: http://meta:8080
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       DEFAULT_ORGANIZATION_NAME: "Local Supabase (${INSTANCE_NAME})"
@@ -46,16 +47,186 @@ services:
       - "${KONG_HTTPS_PORT}:8443"
     environment:
       KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
+      KONG_DECLARATIVE_CONFIG: /tmp/kong.yml
       KONG_DNS_ORDER: LAST,A,CNAME
       KONG_PLUGINS: request-transformer,cors,key-auth,acl,basic-auth
       KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
       KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
-    volumes:
-      - ./kong.yml:/var/lib/kong/kong.yml:ro
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cat <<EOF > /tmp/kong.yml
+        _format_version: "2.1"
+        _transform: true
+
+        consumers:
+          - username: anon
+            keyauth_credentials:
+              - key: "$$ANON_KEY"
+          - username: service_role
+            keyauth_credentials:
+              - key: "$$SERVICE_ROLE_KEY"
+
+        services:
+          - name: auth
+            url: http://auth:9999
+            routes:
+              - name: auth-v1
+                strip_path: true
+                paths:
+                  - /auth/v1
+            plugins:
+              - name: cors
+                config:
+                  origins:
+                    - "*"
+                  methods:
+                    - GET
+                    - POST
+                    - PUT
+                    - PATCH
+                    - DELETE
+                    - OPTIONS
+                  headers:
+                    - Authorization
+                    - Content-Type
+                    - apikey
+                    - X-Client-Info
+                  exposed_headers:
+                    - Content-Range
+                    - X-Total-Count
+                  max_age: 3600
+
+          - name: rest
+            url: http://rest:3000
+            routes:
+              - name: rest-v1
+                strip_path: true
+                paths:
+                  - /rest/v1
+            plugins:
+              - name: cors
+                config:
+                  origins:
+                    - "*"
+                  methods:
+                    - GET
+                    - POST
+                    - PUT
+                    - PATCH
+                    - DELETE
+                    - OPTIONS
+                  headers:
+                    - Authorization
+                    - Content-Type
+                    - apikey
+                    - X-Client-Info
+                    - Prefer
+                  exposed_headers:
+                    - Content-Range
+                    - X-Total-Count
+                  max_age: 3600
+              - name: key-auth
+                config:
+                  key_names:
+                    - apikey
+                  hide_credentials: false
+
+          - name: storage
+            url: http://storage:5000
+            routes:
+              - name: storage-v1
+                strip_path: true
+                paths:
+                  - /storage/v1
+            plugins:
+              - name: cors
+                config:
+                  origins:
+                    - "*"
+                  methods:
+                    - GET
+                    - POST
+                    - PUT
+                    - PATCH
+                    - DELETE
+                    - OPTIONS
+                  headers:
+                    - Authorization
+                    - Content-Type
+                    - apikey
+                    - X-Client-Info
+                  max_age: 3600
+
+          - name: realtime
+            url: http://realtime:4000/socket
+            routes:
+              - name: realtime-v1
+                strip_path: true
+                paths:
+                  - /realtime/v1
+            plugins:
+              - name: cors
+                config:
+                  origins:
+                    - "*"
+                  methods:
+                    - GET
+                    - POST
+                    - OPTIONS
+                  headers:
+                    - Authorization
+                    - Content-Type
+                    - apikey
+                    - X-Client-Info
+                  max_age: 3600
+        EOF
+        exec /docker-entrypoint.sh kong docker-start
     depends_on:
       db:
         condition: service_healthy
+
+  db-setup:
+    container_name: supabase_${INSTANCE_NAME}_db_setup
+    image: supabase/postgres:${POSTGRES_VERSION:-15.6.1.143}
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        echo "Waiting for PostgreSQL to accept connections..."
+        ADMIN_PASS=""
+        for i in $$(seq 1 30); do
+          if PGPASSWORD="$$POSTGRES_PASSWORD" psql -h db -U supabase_admin -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+            ADMIN_PASS="$$POSTGRES_PASSWORD"
+            break
+          elif PGPASSWORD="postgres" psql -h db -U supabase_admin -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+            ADMIN_PASS="postgres"
+            break
+          fi
+          sleep 1
+        done
+
+        if [ -n "$$ADMIN_PASS" ]; then
+          PGPASSWORD="$$ADMIN_PASS" psql -h db -U supabase_admin -d postgres -c "
+            ALTER USER supabase_admin WITH PASSWORD '$$POSTGRES_PASSWORD';
+            ALTER USER postgres WITH PASSWORD '$$POSTGRES_PASSWORD';
+            ALTER USER anon WITH PASSWORD '$$POSTGRES_PASSWORD';
+            ALTER USER authenticated WITH PASSWORD '$$POSTGRES_PASSWORD';
+            ALTER USER authenticator WITH PASSWORD '$$POSTGRES_PASSWORD';
+            ALTER USER supabase_auth_admin WITH PASSWORD '$$POSTGRES_PASSWORD';
+            ALTER USER supabase_storage_admin WITH PASSWORD '$$POSTGRES_PASSWORD';
+            CREATE SCHEMA IF NOT EXISTS _realtime;
+            ALTER SCHEMA _realtime OWNER TO supabase_admin;
+          "
+        fi
 
   auth:
     container_name: supabase_${INSTANCE_NAME}_auth
@@ -88,6 +259,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      db-setup:
+        condition: service_completed_successfully
 
   rest:
     container_name: supabase_${INSTANCE_NAME}_rest
@@ -107,6 +280,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      db-setup:
+        condition: service_completed_successfully
 
   realtime:
     container_name: supabase_${INSTANCE_NAME}_realtime
@@ -121,16 +296,20 @@ services:
       DB_USER: supabase_admin
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       DB_NAME: postgres
-      DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
+      DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime,realtime,public'
       DB_ENC_KEY: supabaserealtime
       API_JWT_SECRET: ${JWT_SECRET}
       SECRET_KEY_BASE: ${SECRET_KEY_BASE}
       ERL_AFLAGS: -proto_dist inet_tcp
       ENABLE_TAILSCALE: "false"
       DNS_NODES: "''"
+      RLIMIT_NOFILE: "65536"
+      APP_NAME: realtime
     depends_on:
       db:
         condition: service_healthy
+      db-setup:
+        condition: service_completed_successfully
 
   storage:
     container_name: supabase_${INSTANCE_NAME}_storage
@@ -157,6 +336,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      db-setup:
+        condition: service_completed_successfully
       rest:
         condition: service_started
 
@@ -176,6 +357,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      db-setup:
+        condition: service_completed_successfully
 
   db:
     container_name: supabase_${INSTANCE_NAME}_db
@@ -194,3 +377,25 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  tunnel:
+    container_name: supabase_${INSTANCE_NAME}_tunnel
+    image: node:20-alpine
+    restart: unless-stopped
+    environment:
+      TUNNEL_SERVER: ${TUNNEL_SERVER:-wss://jcode.api.br}
+      TUNNEL_AUTH_TOKEN: ${TUNNEL_AUTH_TOKEN:-user_token_abc}
+      API_TUNNEL_ID: ${INSTANCE_NAME}
+      API_TARGET_HOST: kong
+      API_TARGET_PORT: 8000
+      STUDIO_TUNNEL_ID: ${INSTANCE_NAME}-studio
+      STUDIO_TARGET_HOST: studio
+      STUDIO_TARGET_PORT: 3000
+    volumes:
+      - ./tunnel:/app/tunnel
+    working_dir: /app/tunnel
+    command: ["sh", "-c", "if [ ! -d node_modules/ws ]; then npm install --production; fi && node runner.js"]
+    depends_on:
+      - kong
+      - studio
+

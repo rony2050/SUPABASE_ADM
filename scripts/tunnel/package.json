@@ -1,0 +1,9 @@
+{
+  "name": "supabase-tunnel-client",
+  "version": "1.0.0",
+  "description": "Supabase Manager Dual Tunnel Client for jcode.api.br",
+  "main": "runner.js",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

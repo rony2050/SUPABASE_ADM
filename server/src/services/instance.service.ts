@@ -75,13 +75,13 @@ export class InstanceService {
     const content = fs.readFileSync(filePath, 'utf-8');
     const result: Record<string, string> = {};
 
-    for (const line of content.split('\n')) {
+    for (const line of content.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) continue;
       const eqIdx = trimmed.indexOf('=');
       if (eqIdx !== -1) {
         const key = trimmed.slice(0, eqIdx).trim();
-        const value = trimmed.slice(eqIdx + 1).trim();
+        const value = trimmed.slice(eqIdx + 1).replace(/\r/g, '').trim();
         result[key] = value;
       }
     }
@@ -128,7 +128,7 @@ export class InstanceService {
         meta: parseInt(env.META_PORT || '8080', 10),
       };
 
-      const requiredServices = ['studio', 'kong', 'auth', 'rest', 'storage', 'realtime', 'meta', 'db'];
+      const requiredServices = ['studio', 'kong', 'auth', 'rest', 'storage', 'realtime', 'meta', 'db', 'tunnel'];
       const services: ServiceStatus[] = [];
       let runningCount = 0;
 
@@ -156,13 +156,15 @@ export class InstanceService {
       }
 
       let overallStatus: InstanceSummary['status'] = 'stopped';
-      if (runningCount === requiredServices.length) {
+      if (runningCount >= requiredServices.length - 1 && services.find(s => s.name === 'db')?.state === 'running') {
         overallStatus = 'running';
       } else if (runningCount > 0) {
         overallStatus = 'partial';
       }
 
       const stat = fs.statSync(instanceDir);
+      const siteUrl = env.SITE_URL || `https://${name}-studio.jcode.api.br`;
+      const apiUrl = env.API_EXTERNAL_URL || `https://${name}.jcode.api.br`;
 
       instances.push({
         name,
@@ -170,12 +172,12 @@ export class InstanceService {
         createdAt: stat.birthtime.toISOString(),
         ports,
         urls: {
-          studioUrl: `http://localhost:${ports.studio}`,
-          apiUrl: `http://localhost:${ports.kongHttp}`,
-          restUrl: `http://localhost:${ports.kongHttp}/rest/v1`,
-          authUrl: `http://localhost:${ports.kongHttp}/auth/v1`,
-          storageUrl: `http://localhost:${ports.kongHttp}/storage/v1`,
-          realtimeUrl: `ws://localhost:${ports.kongHttp}/realtime/v1`,
+          studioUrl: siteUrl,
+          apiUrl: apiUrl,
+          restUrl: `${apiUrl}/rest/v1`,
+          authUrl: `${apiUrl}/auth/v1`,
+          storageUrl: `${apiUrl}/storage/v1`,
+          realtimeUrl: apiUrl.replace(/^http/, 'ws') + '/realtime/v1',
         },
         services,
       });
@@ -210,10 +212,13 @@ export class InstanceService {
       throw new Error(`A instância '${name}' já existe.`);
     }
 
+    // Remover volumes residuais antigos se existirem antes de criar
+    await runCommand(`docker volume rm -f supabase_db_data_${name} supabase_storage_data_${name}`).catch(() => {});
+
     const portBase = params.portBase || (await this.getNextAvailablePort());
     const ctlScript = path.join(this.scriptsDir, 'supabase-ctl.sh');
 
-    let cmd = `bash "${ctlScript}" create "${name}" --port-base ${portBase}`;
+    let cmd = `bash "${ctlScript}" create "${name}" --port-base ${portBase} --domain jcode.api.br`;
     if (dbPassword) {
       cmd += ` --db-pass "${dbPassword}"`;
     }
@@ -223,10 +228,62 @@ export class InstanceService {
 
     await runCommand(cmd, this.baseDir);
 
+    // Garantir cópia da pasta tunnel para a instância caso necessário
+    const tunnelTarget = path.join(instanceDir, 'tunnel');
+    const tunnelSrc = path.join(this.scriptsDir, 'tunnel');
+    if (!fs.existsSync(tunnelTarget) && fs.existsSync(tunnelSrc)) {
+      try {
+        fs.cpSync(tunnelSrc, tunnelTarget, { recursive: true });
+      } catch {}
+    }
+
+    if (startAfter) {
+      await this.syncDatabaseCredentials(name);
+    }
+
     return {
       message: `Instância '${name}' criada com sucesso no bloco de portas ${portBase}.`,
       portBase,
     };
+  }
+
+  async syncDatabaseCredentials(name: string): Promise<void> {
+    const instanceDir = path.join(this.instancesDir, name);
+    const envPath = path.join(instanceDir, '.env');
+    if (!fs.existsSync(envPath)) return;
+    const env = this.parseEnvFile(envPath);
+    const dbPassword = env.POSTGRES_PASSWORD?.replace(/\r/g, '').trim();
+    if (!dbPassword) return;
+
+    const dbContainer = `supabase_${name}_db`;
+    // Aguardar o banco estar pronto via pg_isready (até 30 tentativas)
+    for (let i = 0; i < 30; i++) {
+      try {
+        await runCommand(`docker exec ${dbContainer} pg_isready -h 127.0.0.1 -U postgres`);
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+
+    try {
+      const sql = `
+        ALTER USER supabase_admin WITH PASSWORD '${dbPassword}';
+        ALTER USER postgres WITH PASSWORD '${dbPassword}';
+        ALTER USER anon WITH PASSWORD '${dbPassword}';
+        ALTER USER authenticated WITH PASSWORD '${dbPassword}';
+        ALTER USER authenticator WITH PASSWORD '${dbPassword}';
+        ALTER USER supabase_auth_admin WITH PASSWORD '${dbPassword}';
+        ALTER USER supabase_storage_admin WITH PASSWORD '${dbPassword}';
+        CREATE SCHEMA IF NOT EXISTS _realtime;
+        ALTER SCHEMA _realtime OWNER TO supabase_admin;
+      `;
+      await runCommand(`docker exec ${dbContainer} psql -h 127.0.0.1 -U supabase_admin -d postgres -c "${sql.replace(/\r?\n/g, ' ')}"`);
+      // Reiniciar serviços dependentes para reconexão imediata
+      await runCommand('docker compose restart rest storage auth meta realtime', instanceDir).catch(() => {});
+    } catch {
+      // Falhas silenciosas se container estiver indisponível
+    }
   }
 
   async startInstance(name: string): Promise<string> {
@@ -235,6 +292,7 @@ export class InstanceService {
       throw new Error(`Instância '${name}' não encontrada.`);
     }
     const { stdout } = await runCommand('docker compose up -d', instanceDir);
+    await this.syncDatabaseCredentials(name);
     return stdout || `Instância ${name} iniciada com sucesso.`;
   }
 
@@ -253,6 +311,7 @@ export class InstanceService {
       throw new Error(`Instância '${name}' não encontrada.`);
     }
     const { stdout } = await runCommand('docker compose restart', instanceDir);
+    await this.syncDatabaseCredentials(name);
     return stdout || `Instância ${name} reiniciada com sucesso.`;
   }
 
@@ -263,6 +322,9 @@ export class InstanceService {
     }
     const downCmd = keepVolumes ? 'docker compose down' : 'docker compose down -v';
     await runCommand(downCmd, instanceDir).catch(() => {});
+    if (!keepVolumes) {
+      await runCommand(`docker volume rm -f supabase_db_data_${name} supabase_storage_data_${name}`).catch(() => {});
+    }
     fs.rmSync(instanceDir, { recursive: true, force: true });
     return `Instância '${name}' removida com sucesso.`;
   }
@@ -308,12 +370,12 @@ export class InstanceService {
       connectionString: `postgresql://postgres:${pgPass}@localhost:${pgPort}/postgres`,
       directDbString: `postgresql://postgres:${pgPass}@127.0.0.1:${pgPort}/postgres`,
       urls: {
-        studio: `http://localhost:${studioPort}`,
-        api: `http://localhost:${kongPort}`,
-        rest: `http://localhost:${kongPort}/rest/v1`,
-        auth: `http://localhost:${kongPort}/auth/v1`,
-        storage: `http://localhost:${kongPort}/storage/v1`,
-        realtime: `ws://localhost:${kongPort}/realtime/v1`,
+        studio: env.SITE_URL || `https://${name}-studio.jcode.api.br`,
+        api: env.API_EXTERNAL_URL || `https://${name}.jcode.api.br`,
+        rest: `${env.API_EXTERNAL_URL || `https://${name}.jcode.api.br`}/rest/v1`,
+        auth: `${env.API_EXTERNAL_URL || `https://${name}.jcode.api.br`}/auth/v1`,
+        storage: `${env.API_EXTERNAL_URL || `https://${name}.jcode.api.br`}/storage/v1`,
+        realtime: (env.API_EXTERNAL_URL || `https://${name}.jcode.api.br`).replace(/^http/, 'ws') + '/realtime/v1',
       },
     };
   }
@@ -342,6 +404,8 @@ export class InstanceService {
       (err) => onLogChunk(`[ERROR] ${err}\n`),
       () => onClose()
     );
+  }
+
   getConfig(name: string): { content: string; path: string } {
     const instanceDir = path.join(this.instancesDir, name);
     if (!fs.existsSync(instanceDir)) {

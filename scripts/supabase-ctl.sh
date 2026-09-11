@@ -17,11 +17,24 @@ BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # Diretórios padrão
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SCRIPT_SOURCE" ]; do
+  SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+  SCRIPT_SOURCE="$(readlink "$SCRIPT_SOURCE")"
+  [[ $SCRIPT_SOURCE != /* ]] && SCRIPT_SOURCE="$SCRIPT_DIR/$SCRIPT_SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)"
 BASE_DIR="${SUPABASE_MANAGER_DIR:-/opt/supabase-manager}"
 INSTANCES_DIR="${BASE_DIR}/instances"
 TEMPLATES_DIR="${SCRIPT_DIR}/templates"
 LIB_DIR="${SCRIPT_DIR}/lib"
+
+if [[ ! -d "$LIB_DIR" && -d "${BASE_DIR}/scripts/lib" ]]; then
+  LIB_DIR="${BASE_DIR}/scripts/lib"
+fi
+if [[ ! -d "$TEMPLATES_DIR" && -d "${BASE_DIR}/scripts/templates" ]]; then
+  TEMPLATES_DIR="${BASE_DIR}/scripts/templates"
+fi
 
 mkdir -p "${INSTANCES_DIR}"
 
@@ -29,6 +42,11 @@ mkdir -p "${INSTANCES_DIR}"
 if [[ -f "${LIB_DIR}/keygen.sh" ]]; then
   # shellcheck source=/dev/null
   source "${LIB_DIR}/keygen.sh"
+elif [[ -f "${BASE_DIR}/scripts/lib/keygen.sh" ]]; then
+  source "${BASE_DIR}/scripts/lib/keygen.sh"
+else
+  echo "Erro: keygen.sh não encontrado em ${LIB_DIR} ou ${BASE_DIR}/scripts/lib" >&2
+  exit 1
 fi
 
 log_info() { echo -e "${BLUE}ℹ${NC} ${BOLD}$1${NC}"; }
@@ -111,7 +129,7 @@ cmd_create() {
 
   local custom_port_base=""
   local custom_db_pass=""
-  local custom_domain=""
+  local custom_domain="jcode.api.br"
   local custom_api_url=""
   local custom_studio_url=""
   local start_after=1
@@ -169,6 +187,9 @@ cmd_create() {
   local port_realtime=$((port_base + 7))   # Ex: 54307
   local port_meta=$((port_base + 8))       # Ex: 54308
 
+  # Garantir que volumes residuais antigos com o mesmo nome sejam removidos
+  docker volume rm -f "supabase_db_data_${name}" "supabase_storage_data_${name}" 2>/dev/null || true
+
   mkdir -p "$instance_dir"
 
   # Gerar credenciais
@@ -180,13 +201,13 @@ cmd_create() {
 
   # Extrair valores
   local jwt_secret anon_key service_role_key db_password dashboard_password secret_key_base vault_enc_key
-  jwt_secret=$(echo "$creds" | grep '^JWT_SECRET=' | cut -d= -f2-)
-  anon_key=$(echo "$creds" | grep '^ANON_KEY=' | cut -d= -f2-)
-  service_role_key=$(echo "$creds" | grep '^SERVICE_ROLE_KEY=' | cut -d= -f2-)
-  db_password=$(echo "$creds" | grep '^POSTGRES_PASSWORD=' | cut -d= -f2-)
-  dashboard_password=$(echo "$creds" | grep '^DASHBOARD_PASSWORD=' | cut -d= -f2-)
-  secret_key_base=$(echo "$creds" | grep '^SECRET_KEY_BASE=' | cut -d= -f2-)
-  vault_enc_key=$(echo "$creds" | grep '^VAULT_ENC_KEY=' | cut -d= -f2-)
+  jwt_secret=$(echo "$creds" | grep '^JWT_SECRET=' | cut -d= -f2- | tr -d '\r')
+  anon_key=$(echo "$creds" | grep '^ANON_KEY=' | cut -d= -f2- | tr -d '\r')
+  service_role_key=$(echo "$creds" | grep '^SERVICE_ROLE_KEY=' | cut -d= -f2- | tr -d '\r')
+  db_password=$(echo "$creds" | grep '^POSTGRES_PASSWORD=' | cut -d= -f2- | tr -d '\r')
+  dashboard_password=$(echo "$creds" | grep '^DASHBOARD_PASSWORD=' | cut -d= -f2- | tr -d '\r')
+  secret_key_base=$(echo "$creds" | grep '^SECRET_KEY_BASE=' | cut -d= -f2- | tr -d '\r')
+  vault_enc_key=$(echo "$creds" | grep '^VAULT_ENC_KEY=' | cut -d= -f2- | tr -d '\r')
 
   # Calcular URLs públicas (com ou sem domínio de túnel)
   local site_url="http://localhost:${port_studio}"
@@ -243,11 +264,84 @@ cmd_create() {
   # Copiar docker-compose.yml
   cp "${TEMPLATES_DIR}/docker-compose.template.yml" "${instance_dir}/docker-compose.yml"
 
+  # Copiar arquivos do cliente de túnel (runner, client, node_modules)
+  local tunnel_target="${instance_dir}/tunnel"
+  mkdir -p "$tunnel_target"
+  local tunnel_src=""
+  if [[ -d "${TEMPLATES_DIR}/../tunnel" ]]; then
+    tunnel_src="${TEMPLATES_DIR}/../tunnel"
+  elif [[ -d "${BASE_DIR}/scripts/tunnel" ]]; then
+    tunnel_src="${BASE_DIR}/scripts/tunnel"
+  elif [[ -d "/opt/supabase-manager/scripts/tunnel" ]]; then
+    tunnel_src="/opt/supabase-manager/scripts/tunnel"
+  fi
+  if [[ -n "$tunnel_src" && -d "$tunnel_src" ]]; then
+    cp -r "$tunnel_src"/* "$tunnel_target/" 2>/dev/null || true
+  fi
+
+  # Gerar config.toml com subdomínios oficiais jcode.api.br
+  local config_file="${instance_dir}/config.toml"
+  cat <<EOF > "$config_file"
+# Supabase Configuration for instance: ${name}
+# Documentation: https://supabase.com/docs/guides/local-development/cli/config
+
+project_id = "${name}"
+
+[api]
+enabled = true
+port = ${port_kong}
+external_url = "${api_external_url}"
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = ${port_postgres}
+shadow_port = $((port_postgres - 2))
+health_timeout = "2m"
+major_version = 15
+
+[studio]
+enabled = true
+port = ${port_studio}
+api_url = "${supabase_public_url}"
+
+[local_smtp]
+enabled = true
+port = $((port_studio + 1))
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[auth]
+enabled = true
+site_url = "${site_url}"
+additional_redirect_urls = [
+  "${site_url}",
+  "${site_url}/**",
+  "${api_external_url}",
+  "${api_external_url}/**",
+  "http://localhost:3000",
+  "http://localhost:3000/**"
+]
+jwt_expiry = 315360000
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false
+EOF
+
+  # Normalizar finais de linha para UNIX (remover qualquer \r)
+  sed -i 's/\r$//' "${instance_dir}/.env" "${instance_dir}/kong.yml" "${instance_dir}/docker-compose.yml" "${config_file}" 2>/dev/null || true
+
   log_success "Instância '${name}' configurada com sucesso!"
-  echo -e "  • ${BOLD}Studio Web UI:${NC}    ${CYAN}${site_url}${NC} (Porta local: ${port_studio})"
-  echo -e "  • ${BOLD}Kong API Gateway:${NC} ${CYAN}${api_external_url}${NC} (Porta local: ${port_kong})"
+  echo -e "  • ${BOLD}Studio Web UI:${NC}    ${CYAN}${site_url}${NC} (Local: http://localhost:${port_studio})"
+  echo -e "  • ${BOLD}Kong API Gateway:${NC} ${CYAN}${api_external_url}${NC} (Local: http://localhost:${port_kong})"
   echo -e "  • ${BOLD}PostgreSQL DB:${NC}    ${CYAN}localhost:${port_postgres}${NC}"
   echo -e "  • ${BOLD}DB Password:${NC}      ${YELLOW}${db_password}${NC}"
+  echo -e "  • ${BOLD}Túneis Ativos:${NC}     ${GREEN}https://${name}.${custom_domain}${NC} | ${GREEN}https://${name}-studio.${custom_domain}${NC}"
 
   if [[ $start_after -eq 1 ]]; then
     log_info "Iniciando containers da instância..."
@@ -269,6 +363,40 @@ cmd_start() {
 
   log_info "Iniciando Supabase [${name}]..."
   (cd "$instance_dir" && docker compose up -d)
+
+  # Sincronizar senhas e permissões diretamente no PostgreSQL via 127.0.0.1 (trust local)
+  local db_container="supabase_${name}_db"
+  local db_password
+  db_password=$(grep '^POSTGRES_PASSWORD=' "${instance_dir}/.env" 2>/dev/null | cut -d= -f2- | tr -d '\r')
+  if [[ -n "$db_password" ]]; then
+    local max_attempts=30
+    local attempt=1
+    while [[ $attempt -le $max_attempts ]]; do
+      if docker exec "$db_container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then
+        break
+      fi
+      sleep 1
+      attempt=$((attempt + 1))
+    done
+
+    if docker exec "$db_container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then
+      docker exec "$db_container" psql -h 127.0.0.1 -U supabase_admin -d postgres -c "
+        ALTER USER supabase_admin WITH PASSWORD '${db_password}';
+        ALTER USER postgres WITH PASSWORD '${db_password}';
+        ALTER USER anon WITH PASSWORD '${db_password}';
+        ALTER USER authenticated WITH PASSWORD '${db_password}';
+        ALTER USER authenticator WITH PASSWORD '${db_password}';
+        ALTER USER supabase_auth_admin WITH PASSWORD '${db_password}';
+        ALTER USER supabase_storage_admin WITH PASSWORD '${db_password}';
+        CREATE SCHEMA IF NOT EXISTS _realtime;
+        ALTER SCHEMA _realtime OWNER TO supabase_admin;
+      " >/dev/null 2>&1 || true
+
+      # Reiniciar servicos para reconectar com credenciais validadas
+      (cd "$instance_dir" && docker compose restart rest storage auth meta realtime >/dev/null 2>&1 || true)
+    fi
+  fi
+
   log_success "Instância [${name}] iniciada!"
 }
 
@@ -445,6 +573,7 @@ cmd_destroy() {
     (cd "$instance_dir" && docker compose down)
   else
     (cd "$instance_dir" && docker compose down -v)
+    docker volume rm -f "supabase_db_data_${name}" "supabase_storage_data_${name}" 2>/dev/null || true
   fi
 
   rm -rf "$instance_dir"

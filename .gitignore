@@ -2,4 +2,7 @@
 .ag-kit-backups
 .temp_ag_kit
 node_modules
-package-lock.json
+package-lock.
+instances/
+backups/
+*.log

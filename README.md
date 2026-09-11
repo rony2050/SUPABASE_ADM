@@ -49,7 +49,7 @@ Cada instância criada é isolada em sua própria rede Docker (`supabase_net_<no
 Clone o repositório no seu servidor Linux e execute o script de instalação como `root` ou `sudo`:
 
 ```bash
-git clone https://github.com/rony2050/ADM.git /opt/supabase-manager
+git clone https://github.com/rony2050/SUPABASE_ADM.git /opt/supabase-manager
 cd /opt/supabase-manager
 sudo bash scripts/install.sh
 ```

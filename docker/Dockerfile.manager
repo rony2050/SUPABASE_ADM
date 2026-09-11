@@ -9,13 +9,16 @@ RUN apk add --no-cache \
     curl \
     jq \
     coreutils \
-    net-tools
+    net-tools \
+    dos2unix
 
 WORKDIR /app
 
 # Copiar scripts
 COPY scripts/ /opt/supabase-manager/scripts/
-RUN chmod +x /opt/supabase-manager/scripts/*.sh /opt/supabase-manager/scripts/lib/*.sh && \
+RUN cd /opt/supabase-manager/scripts/tunnel && npm install --production && \
+    dos2unix /opt/supabase-manager/scripts/*.sh /opt/supabase-manager/scripts/lib/*.sh /opt/supabase-manager/scripts/tunnel/*.js 2>/dev/null || true && \
+    chmod +x /opt/supabase-manager/scripts/*.sh /opt/supabase-manager/scripts/lib/*.sh && \
     ln -sf /opt/supabase-manager/scripts/supabase-ctl.sh /usr/local/bin/supabase-ctl
 
 # Compilar frontend

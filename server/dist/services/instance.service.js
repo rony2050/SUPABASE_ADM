@@ -143,6 +143,8 @@ class InstanceService {
         if (fs_1.default.existsSync(instanceDir)) {
             throw new Error(`A instância '${name}' já existe.`);
         }
+        // Remover volumes residuais antigos se existirem antes de criar
+        await (0, command_1.runCommand)(`docker volume rm -f supabase_db_data_${name} supabase_storage_data_${name}`).catch(() => { });
         const portBase = params.portBase || (await this.getNextAvailablePort());
         const ctlScript = path_1.default.join(this.scriptsDir, 'supabase-ctl.sh');
         let cmd = `bash "${ctlScript}" create "${name}" --port-base ${portBase}`;
@@ -153,10 +155,48 @@ class InstanceService {
             cmd += ' --no-start';
         }
         await (0, command_1.runCommand)(cmd, this.baseDir);
+        if (startAfter) {
+            await this.syncDatabaseCredentials(name);
+        }
         return {
             message: `Instância '${name}' criada com sucesso no bloco de portas ${portBase}.`,
             portBase,
         };
+    }
+    async syncDatabaseCredentials(name) {
+        const instanceDir = path_1.default.join(this.instancesDir, name);
+        const envPath = path_1.default.join(instanceDir, '.env');
+        if (!fs_1.default.existsSync(envPath)) return;
+        const env = this.parseEnvFile(envPath);
+        const dbPassword = env.POSTGRES_PASSWORD;
+        if (!dbPassword) return;
+
+        const dbContainer = `supabase_${name}_db`;
+        for (let i = 0; i < 30; i++) {
+            try {
+                await (0, command_1.runCommand)(`docker exec ${dbContainer} pg_isready -h 127.0.0.1 -U postgres`);
+                break;
+            } catch {
+                await new Promise((resolve) => setTimeout(resolve, 1000));
+            }
+        }
+
+        try {
+            const sql = `
+                ALTER USER supabase_admin WITH PASSWORD '${dbPassword}';
+                ALTER USER postgres WITH PASSWORD '${dbPassword}';
+                ALTER USER anon WITH PASSWORD '${dbPassword}';
+                ALTER USER authenticated WITH PASSWORD '${dbPassword}';
+                ALTER USER authenticator WITH PASSWORD '${dbPassword}';
+                ALTER USER supabase_auth_admin WITH PASSWORD '${dbPassword}';
+                ALTER USER supabase_storage_admin WITH PASSWORD '${dbPassword}';
+                CREATE SCHEMA IF NOT EXISTS _realtime;
+                ALTER SCHEMA _realtime OWNER TO supabase_admin;
+            `;
+            await (0, command_1.runCommand)(`docker exec ${dbContainer} psql -h 127.0.0.1 -U supabase_admin -d postgres -c "${sql.replace(/\r?\n/g, ' ')}"`);
+        } catch {
+            // Falhas silenciosas se container estiver indisponivel
+        }
     }
     async startInstance(name) {
         const instanceDir = path_1.default.join(this.instancesDir, name);
@@ -164,6 +204,7 @@ class InstanceService {
             throw new Error(`Instância '${name}' não encontrada.`);
         }
         const { stdout } = await (0, command_1.runCommand)('docker compose up -d', instanceDir);
+        await this.syncDatabaseCredentials(name);
         return stdout || `Instância ${name} iniciada com sucesso.`;
     }
     async stopInstance(name) {
@@ -180,6 +221,7 @@ class InstanceService {
             throw new Error(`Instância '${name}' não encontrada.`);
         }
         const { stdout } = await (0, command_1.runCommand)('docker compose restart', instanceDir);
+        await this.syncDatabaseCredentials(name);
         return stdout || `Instância ${name} reiniciada com sucesso.`;
     }
     async destroyInstance(name, keepVolumes = false) {
@@ -189,6 +231,9 @@ class InstanceService {
         }
         const downCmd = keepVolumes ? 'docker compose down' : 'docker compose down -v';
         await (0, command_1.runCommand)(downCmd, instanceDir).catch(() => { });
+        if (!keepVolumes) {
+            await (0, command_1.runCommand)(`docker volume rm -f supabase_db_data_${name} supabase_storage_data_${name}`).catch(() => { });
+        }
         fs_1.default.rmSync(instanceDir, { recursive: true, force: true });
         return `Instância '${name}' removida com sucesso.`;
     }

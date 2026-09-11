@@ -12,6 +12,7 @@ import {
   AlertTriangle,
   Clock,
   FileCode,
+  Zap,
 } from 'lucide-react';
 import { InstanceSummary } from '../types';
 
@@ -143,6 +144,56 @@ export const InstanceCard: React.FC<InstanceCardProps> = ({
           </div>
           <div style={{ fontSize: '1rem', fontWeight: 600, color: '#c084fc', marginTop: '2px' }} className="font-mono">
             {instance.ports.postgres}
+          </div>
+        </div>
+      </div>
+
+      {/* Box de Túneis Públicos jcode.api.br */}
+      <div
+        style={{
+          background: 'rgba(56, 189, 248, 0.05)',
+          border: '1px solid rgba(56, 189, 248, 0.2)',
+          borderRadius: '8px',
+          padding: '0.65rem 0.85rem',
+          marginBottom: '1.25rem',
+          fontSize: '0.78rem',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#38bdf8', fontWeight: 600 }}>
+            <Zap size={13} />
+            <span>Túneis Públicos (jcode.api.br)</span>
+          </span>
+          {instance.services.find((s) => s.name === 'tunnel')?.state === 'running' ? (
+            <span style={{ fontSize: '0.7rem', color: '#10b981', background: 'rgba(16, 185, 129, 0.15)', padding: '1px 6px', borderRadius: '12px' }}>
+              ● Online
+            </span>
+          ) : (
+            <span style={{ fontSize: '0.7rem', color: '#9ca3af' }}>Offline</span>
+          )}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px' }}>
+            <span style={{ color: 'var(--text-muted)' }}>API:</span>
+            <a
+              href={instance.urls.apiUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: '#60a5fa', textDecoration: 'none', fontFamily: 'monospace' }}
+            >
+              {instance.urls.apiUrl} ↗
+            </a>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px' }}>
+            <span style={{ color: 'var(--text-muted)' }}>Studio:</span>
+            <a
+              href={instance.urls.studioUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: '#3ecf8e', textDecoration: 'none', fontFamily: 'monospace' }}
+            >
+              {instance.urls.studioUrl} ↗
+            </a>
           </div>
         </div>
       </div>
